@@ -7,7 +7,7 @@ import { login, unfollow, getUsers, takeAction } from "./api";
 
 (async () => {
   console.log("Start", moment().format("HH:mm:ss"));
-  const browser = await puppeteer.launch({ headless: config.headless });
+  const browser = await puppeteer.launch({ headless: config.headless,executablePath: 'chromium-browser' });
   await login(config.auth, browser);
   console.log("Logged in", moment().format("HH:mm:ss"));
   var j = false;
