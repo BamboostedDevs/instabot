@@ -1,4 +1,6 @@
 import fs from "fs";
+import moment from "moment";
+import config from "../config";
 
 const scrollToPosition = {
   top: (window) => {
@@ -12,6 +14,23 @@ const scrollToPosition = {
     return true;
   },
 };
+
+/**
+ *
+ * @param {Number} ms - how long to scroll in [ms]
+ * @param {Object} page - page instance
+ *
+ */
+async function scrollWithoutPurpose(ms, page) {
+  log("Scrolling without purpose");
+  const end = Date.now() + ms;
+  while (end > Date.now()) {
+    await page.evaluate(() => {
+      window.scrollBy(0, window.innerHeight * Math.random());
+    });
+    await page.waitFor(randomNumber(750, 5000));
+  }
+}
 
 /**
  *
@@ -59,9 +78,7 @@ function flatten(arr) {
  *
  */
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  *
@@ -71,19 +88,19 @@ function sleep(ms) {
 
 async function memorize(user) {
   var _users = { [user]: Date.now() };
-  await fs.readFile("src/history.json", "utf8", async (err, jsonString) => {
+  await fs.readFile("tmp/history.json", "utf8", async (err, jsonString) => {
     if (err) {
-      console.log("Error reading file", err);
+      log("Error reading file", true);
       return;
     }
     try {
       const users = JSON.parse(jsonString);
       _users = { ...users, ..._users };
-      await fs.writeFile("src/history.json", JSON.stringify(_users), (err) => {
-        if (err) console.log("Error writing file", err);
+      await fs.writeFile("tmp/history.json", JSON.stringify(_users), (err) => {
+        if (err) log("Error writing file", true);
       });
     } catch (err) {
-      console.log("Error parsing JSON:", err);
+      log("Error parsing JSON", true);
     }
   });
 }
@@ -95,21 +112,21 @@ async function memorize(user) {
  */
 
 async function erase(user) {
-  await fs.readFile("src/history.json", "utf8", async (err, jsonString) => {
+  await fs.readFile("tmp/history.json", "utf8", async (err, jsonString) => {
     if (err) {
-      console.log("Error reading file", err);
+      log("Error reading file", true);
       return;
     }
     try {
       const users = JSON.parse(jsonString);
       users.hasOwnProperty(user)
         ? delete users[user]
-        : console.log("User does not exist");
-      await fs.writeFile("src/history.json", JSON.stringify(users), (err) => {
-        if (err) console.log("Error writing file", err);
+        : log("User does not exist", true);
+      await fs.writeFile("tmp/history.json", JSON.stringify(users), (err) => {
+        if (err) log("Error writing file", true);
       });
     } catch (err) {
-      console.log("Error parsing JSON:", err);
+      log("Error parsing JSON", true);
     }
   });
 }
@@ -121,19 +138,15 @@ async function erase(user) {
  */
 
 async function getHistory() {
-  await fs.readFile("src/history.json", "utf8", async (err, jsonString) => {
-    if (err) {
-      console.log("Error reading file", err);
-      return false;
-    }
-    try {
-      const users = JSON.parse(jsonString);
-      return users;
-    } catch (error) {
-      console.log(error);
-    }
-    return false;
-  });
+  try {
+    const jsonString = await fs.promises.readFile("tmp/errors.json", "utf8");
+    const users = await JSON.parse(jsonString);
+    if (!users) throw "Error loading file";
+    return users;
+  } catch {
+    log("Error loading history", true);
+  }
+  return false;
 }
 
 /**
@@ -145,8 +158,58 @@ async function getHistory() {
  *
  */
 
-function randomNumber(min, max) {
-  return Math.round(Math.random() * (max - min) + min);
+const randomNumber = (min, max) =>
+  Math.round(Math.random() * (max - min) + min);
+
+/**
+ *
+ * @param {string} message - message of log
+ * @param {Boolean} [error=false] - error presence
+ *
+ */
+
+function log(message, error = false) {
+  console.log(!error, moment().format("HH:mm:ss"), message);
+  if (error) {
+    fs.readFile("tmp/errors.json", "utf8", async (err, jsonString) => {
+      if (err) {
+        log("Error reading file", true);
+        return;
+      }
+      try {
+        var errors = JSON.parse(jsonString);
+        if (errors.hasOwnProperty(message))
+          errors[message].push(moment().format("HH:mm:ss DD.MM"));
+        else {
+          errors = {
+            ...errors,
+            ...{ [message]: [moment().format("HH:mm:ss DD.MM")] },
+          };
+        }
+        await fs.writeFile("tmp/errors.json", JSON.stringify(errors), (err) => {
+          if (err) log("Error writing file", true);
+        });
+      } catch (err) {
+        console.log(err);
+        log("Error parsing JSON", true);
+      }
+    });
+  }
+}
+
+async function secure(promise) {
+  const response = await promise;
+  if (response.error) return false;
+  return true;
+}
+
+function doAction(key) {
+  var random = Math.random();
+  if (random < config.probability[key]) {
+    return true;
+  } else {
+    return false;
+  }
 }
 
 export {
@@ -157,4 +220,8 @@ export {
   erase,
   randomNumber,
   getHistory,
+  log,
+  secure,
+  doAction,
+  scrollWithoutPurpose,
 };

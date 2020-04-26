@@ -1,71 +1,65 @@
 import puppeteer from "puppeteer";
-import config from "./config";
 import moment from "moment";
-import schedule from "node-schedule";
-import { randomNumber, getHistory } from "./utils";
-import { login, unfollow, getUsers, takeAction } from "./api";
+import config from "./config";
+import {
+  secure,
+  log,
+  getHistory,
+  randomNumber,
+  doAction,
+  scrollWithoutPurpose,
+} from "./utils";
+import {
+  handleNotificationsPopup,
+  handleFollow,
+  handleLike,
+  goToTag,
+  login,
+  handleUnfollow,
+  goHome,
+} from "./handlers";
 
-(async () => {
-  console.log("Start", moment().format("HH:mm:ss"));
-  const browser = await puppeteer.launch({ headless: config.headless,executablePath: 'chromium-browser' });
-  await login(config.auth, browser);
-  console.log("Logged in", moment().format("HH:mm:ss"));
-  var j = false;
-  var users = await getUsers(browser);
-  users = [...new Set(users)];
-  console.log(`Got ${users.length} users`, moment().format("HH:mm:ss"));
-  var history = await getHistory();
-
-  var main = schedule.scheduleJob(`1 * * * *`, function () {
-    console.log("Task - main", moment().format("HH:mm:ss"));
-    j && j.cancel();
-    async function follow() {
-      console.log("Follow", moment().format("HH:mm:ss"));
-      await takeAction(users[0], browser);
-      users.splice(0, 1);
+async function takeAction(page) {
+  while (true) {
+    while (config.unfollow_hours.includes(Number(moment().format("HH")))) {
+      const history = await getHistory();
+      console.log(history);
+      const toUnfollow = Object.keys(history).filter(
+        (val) =>
+          moment().diff(history[val], "hours") >= config.keep_follow && val
+      );
+      for (const user of toUnfollow) {
+        if (doAction("unfollow")) await secure(handleUnfollow(page, user));
+        await page.waitFor(randomNumber(1500, 5000));
+      }
+      await page.waitFor(randomNumber(1500, 5000));
     }
-    async function _unfollow(_history) {
-      console.log("Unfollow", moment().format("HH:mm:ss"));
-      if (
-        moment().diff(Number(history[_history[0]]), "hours") >=
-        config.keep_follow
-      ) {
-        await unfollow(_history[0], browser);
-        delete history[_history[0]];
+    while (!config.unfollow_hours.includes(Number(moment().format("HH")))) {
+      !(
+        (await secure(
+          goToTag(page, config.tags[randomNumber(0, config.tags.length - 1)])
+        )) &&
+        (await secure(handleFollow(page))) &&
+        (await secure(handleLike(page)))
+      ) && (await goHome(page, true));
+      if (doAction("scroll_home")) {
+        await goHome(page);
+        await scrollWithoutPurpose(randomNumber(10000, 30000), page);
       }
     }
-    if (config.hours.follow.includes(Number(moment().format("HH")))) {
-      console.log("Schedule Follow", moment().format("HH:mm:ss"));
-      j = schedule.scheduleJob(
-        `${randomNumber(0, 59)} * * * * *`,
-        async function () {
-          console.log("Task - follow", moment().format("HH:mm:ss"));
-          if (users.length > 0) await follow();
-          else {
-            users = await getUsers(browser);
-            users = [...new Set(users)];
-            console.log(
-              `Got ${users.length} users`,
-              moment().format("HH:mm:ss")
-            );
-            await follow();
-          }
-        }
-      );
-    } else {
-      console.log("Schedule unfollow", moment().format("HH:mm:ss"));
-      j = schedule.scheduleJob(
-        `${randomNumber(0, 59)} * * * * *`,
-        async function () {
-          console.log("Task - unfollow", moment().format("HH:mm:ss"));
-          var _history = Object.keys(history);
-          if (_history.length > 0) await _unfollow(_history);
-          else {
-            history = await getHistory();
-            await _unfollow(Object.keys(history));
-          }
-        }
-      );
-    }
+  }
+}
+
+(async () => {
+  log("Start");
+  const browser = await puppeteer.launch({
+    userDataDir: "tmp/user-data-dir",
+    args: ["--no-sandbox"],
+    headless: config.headless,
+    // executablePath: "chromium-browser",
   });
+  const page = await browser.newPage();
+  (await secure(login(page, config.auth))) &&
+    (await secure(handleNotificationsPopup(page))) &&
+    (await takeAction(page));
 })();
